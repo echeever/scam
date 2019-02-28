@@ -5,10 +5,11 @@
 % http://lpsa.swarthmore.edu/Systems/Electrical/mna/MNA1.html
 %
 % Written by Erik Cheever, Swarthmore College, 2019
+% echeeve1@swarthmore.edu
 
 fprintf('\nStarted -- please be patient.\n\n');
 
-%% Print out the netlist (a file describing the circuit with one circuit 
+%% Print out the netlist (a file describing the circuit with one circuit
 % per line.
 fprintf('Netlist:');
 type(fname)
@@ -17,8 +18,8 @@ fileIn=textscan(fid,'%s %s %s %s %s %s');  % Read file (up to 6 items per line
 % Split each line into 6 columns, the meaning of the last 3 columns will
 % vary from element to element.  The first item is always the name of the
 % circuit element and the second and third items are always node numbers.
-[Name, N1, N2, arg3, arg4, arg5] = fileIn{:};  
-% Name, node1, node2, and value
+[Name, N1, N2, arg3, arg4, arg5] = fileIn{:};
+% Name, node1, node2, and up to three other arguments.
 fclose(fid);
 
 nLines = length(Name);  % Number of lines in file (or elements in circuit).
@@ -28,33 +29,15 @@ N2=str2double(N2);
 
 tic                  % Begin timing.
 
-
-% Parse input file to get number of each type of element.
-x=blanks(nLines);
-for k1=1:nLines
-    x(k1) = Name{k1}(1);  % Create string with first letter of each line
-end
-% 
-% numZ=count(x,'R')+count(x,'L')+count(x,'C'); % Number of passive elements.
-% numV=count(x,'V');  % # of independent voltage sources
-% numO=count(x,'O');  % # of op amps
-% % numI=count(x,'I');  % # of independent current sources (don't need)
-% numE=count(x,'E');  % # of VCVS
-% %numF=count(x,'F');  % # of CCCS
-% % numG=count(x,'G');  % # of VCCS
-% numH=count(x,'H');  % # of CCVS
 n = max([N1; N2]);   % Find highest node number (i.e., number of nodes)
-% find "m", the number of voltage sources.
-m=0;
+
+m=0; % "m" is the number of voltage sources, determined below.
 for k1=1:nLines                  % Check all lines to find voltage sources
     switch Name{k1}(1)
         case {'V', 'O', 'E', 'H'}  % These are the circuit elements with
-          m = m + 1;               % voltage sources, so increment m.
+            m = m + 1;             % We have voltage source, increment m.
     end
 end
-% 
-% n=numNode;                  % number of nodes
-% % m=numV+numO+numE+numH;      % number of voltage elements
 
 % Preallocate all arrays (use Litovski's notation).
 G=cell(n,n);  [G{:}]=deal('0');    % G is nxn filled with '0'
@@ -73,6 +56,7 @@ vsCnt = 0;
 % This loop does the bulk of filling in the arrays.  It scans line by line
 % and fills in the arrays depending on the type of element found on the
 % current line.
+% See http://lpsa.swarthmore.edu/Systems/Electrical/mna/MNA3.html for details.
 for k1=1:nLines
     n1 = N1(k1);   % Get the two node numbers
     n2 = N2(k1);
@@ -89,7 +73,7 @@ for k1=1:nLines
                     g=['s*' Name{k1}];
             end
             % Here we fill in G array by adding conductance.
-            % The procedure is slightly different if one of the nodes is 
+            % The procedure is slightly different if one of the nodes is
             % ground, so check for thos accordingly.
             if (n1==0)
                 G{n2,n2} = sprintf('%s + %s',G{n2,n2},g);  % Add conductance.
@@ -101,7 +85,8 @@ for k1=1:nLines
                 G{n1,n2} = sprintf('%s - %s',G{n1,n2},g);  % Sub conductance.
                 G{n2,n1} = sprintf('%s - %s',G{n2,n1},g);  % Sub conductance.
             end
-        % Voltage source.    
+            
+        % Independent voltage source.
         case 'V' % VXXXXXXX N1 N2 VALUE    (N1=anode, N2=cathode)
             vsCnt = vsCnt + 1;  % Keep track of which source this is.
             % Now fill in B and C arrays (again, process is slightly
@@ -114,9 +99,10 @@ for k1=1:nLines
                 B{n2,vsCnt} = [B{n2,vsCnt} ' - 1'];
                 C{vsCnt, n2} = [C{vsCnt, n2} ' - 1'];
             end
-            e{vsCnt}=Name{k1};         % Add Name of source to RHS 
+            e{vsCnt}=Name{k1};         % Add Name of source to RHS
             j{vsCnt}=['I_' Name{k1}];  % Add current through source to unknowns
             
+        % Independent current source
         case 'I' % IXXXXXXX N1 N2 VALUE  (Current N1 to N2)
             % Add current to nodes (if node is not ground)
             if n1~=0
@@ -126,20 +112,22 @@ for k1=1:nLines
                 i{n2} = [i{n2} ' + ' Name{k1}]; % add current to n2
             end
             
+        % Op amp
         case 'O'  % 0XXXXXXX N1 N2 N3 VALUE  (N1=+, N2=-, N3=Vout)
             n3 = str2double(arg3{k1});  % This find n3
             vsCnt = vsCnt + 1;          % Keep track of number of voltage sources
- 
+            
             % Change B and C matrices as appropriate.
-                        B{n3,vsCnt} = [B{n3,vsCnt} ' + 1'];
+            B{n3,vsCnt} = [B{n3,vsCnt} ' + 1'];
             if n1~=0
                 C{vsCnt, n1} = [C{vsCnt, n1} ' + 1'];
             end
             if n2~=0
                 C{vsCnt, n2} = [C{vsCnt, n2} ' - 1'];
             end
-                       j{vsCnt}=['I_' Name{k1}];  % Add current through source to unknowns
+            j{vsCnt}=['I_' Name{k1}];  % Add current through source to unknowns
             
+        % Voltage controlled voltage source
         case 'E'                         % VCVS
             vsCnt = vsCnt + 1;           % Keep track of number of voltage sources
             nc1 = str2double(arg3{k1});  % Control voltage, pos side
@@ -167,14 +155,7 @@ for k1=1:nLines
             
             j{vsCnt}=['I_' Name{k1}]; % Add current through source to unknowns
             
-        % For the CCCS we need the controlling current, which is
-        % defined as the current through one of the voltage sources.  
-        % Since this voltage may not have been defined yet (i.e., it 
-        % comes later in the circuit definition file), we leave this
-        % part of the matrix generation for later. 
-        % For the CCCS there is nothing to add at this point.
-        case 'F'    % CCCS FXXXXXXX N+ N- VNAM VALUE
-            
+        % Voltage controlled current source
         case 'G'    % VCCS GXXXXXXX N+ N- NC+ NC- VALUE
             nc1 = str2double(arg3{k1});    % Control voltage, pos side
             nc2 = str2double(arg4{k1});    % Control voltage, neg side
@@ -217,7 +198,17 @@ for k1=1:nLines
                     G{n1,nc1} = [G{n2,nc1} ' + ' g];
                     G{n2,nc1} = [G{n2,nc1} ' - ' g];
             end
-                       
+            
+        % Current controlled current source.
+        % For the CCCS we need the controlling current, which is
+        % defined as the current through one of the voltage sources.
+        % Since this voltage may not have been defined yet (i.e., it
+        % comes later in the circuit definition file), we leave this
+        % part of the matrix generation for later.
+        % For the CCCS there is nothing to add at this point.
+        case 'F'    % CCCS FXXXXXXX N+ N- VNAM VALUE
+            
+        % Current controlled voltage source
         % For the CCVS we need the controlling current which is defined as the
         % current through one of the voltage sources.  Since this voltage may not
         % have been defined yet (i.e., it comes later in the circuit definition
@@ -247,13 +238,13 @@ for k1=1:nLines
         case 'H'
             % Here we find the indices in the matrix j:
             %    of the controlling voltage (cvInd)
-            %    as well as the index of this element (hInd) 
+            %    as well as the index of this element (hInd)
             cv = arg3{k1};  % Name of controlling voltages
             cvInd = find(contains(j,cv));  % Index of controlling voltage.
             hInd = find(contains(j,Name{k1})); % Index of CCVS (this element)
-            D{hInd,cvInd}=Name{k1};  % Set the value of the D matrix.
+            D{hInd,cvInd}=['-' Name{k1}];  % Set the value of the D matrix.
         case 'F'
-            % Here we find the index in the matrix j of the controlling 
+            % Here we find the index in the matrix j of the controlling
             % voltage (cvInd)
             cv = arg3{k1}; % Name of controlling voltages
             cvInd = find(contains(j,cv));  % Index of controlling voltage
@@ -266,7 +257,8 @@ for k1=1:nLines
             end
     end
 end
-%%  The submatrices are now complete.  Form the A, x, and z matrices.
+%%  The submatrices are now complete.  Form the A, x, and z matrices,
+% and solve!
 
 A = str2sym([G B; C D]); %Create and display A matrix
 fprintf('\nThe A matrix: \n');
@@ -298,20 +290,20 @@ end
 fprintf('\nThe solution:  \n');
 disp(x==eval(x))
 
-%% Lastly assign any numeric values to symbolic variables.
+%% Lastly, assign any numeric values to symbolic variables.
 % Go through the elements a line at a time and see if the values are valid
 % numbers.  If so, assign them to the variable name.  Then you can use
 % "eval" to get numberical results.
 for k1=1:nLines
     switch Name{k1}(1)
         % These circuit elements defined by three variables, 2 nodes and a
-        % value.  The third variable (arg3) is the value. 
+        % value.  The third variable (arg3) is the value.
         case {'R', 'L', 'C', 'V', 'I'}
             [num, status] = str2num(arg3{k1}); %#ok<ST2NM>
-        % Elements defined by four variables, arg4 is the value.
+            % Elements defined by four variables, arg4 is the value.
         case {'H', 'F'}
             [num, status] = str2num(arg4{k1}); %#ok<ST2NM>
-        % Elements defined by five variables, arg5 is the value.
+            % Elements defined by five variables, arg5 is the value.
         case {'E', 'G'}
             [num, status] = str2num(arg5{k1}); %#ok<ST2NM>
     end
