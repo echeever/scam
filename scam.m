@@ -14,7 +14,7 @@ fprintf('\nStarted -- please be patient.\n\n');
 fprintf('Netlist:');
 type(fname)
 fid = fopen(fname);
-fileIn=textscan(fid,'%s %s %s %s %s %s');  % Read file (up to 6 items per line
+fileIn=textscan(fid,'%s %s %s %s %s %s','CommentStyle','#');  % Read file (up to 6 items per line), lines starting with "#" are ingnored
 % Split each line into 6 columns, the meaning of the last 3 columns will
 % vary from element to element.  The first item is always the name of the
 % circuit element and the second and third items are always node numbers.
@@ -35,7 +35,9 @@ m=0; % "m" is the number of voltage sources, determined below.
 for k1=1:nLines                  % Check all lines to find voltage sources
     switch Name{k1}(1)
         case {'V', 'O', 'E', 'H'}  % These are the circuit elements with
-            m = m + 1;             % We have voltage source, increment m.
+            m = m + 1;                 % voltage source, increment m.
+        case {'T'}                 % Ideal Transformer equivalent to 2 sources
+            m = m + 2;
     end
 end
 
@@ -154,7 +156,39 @@ for k1=1:nLines
             end
             
             j{vsCnt}=['I_' Name{k1}]; % Add current through source to unknowns
+        
+        % Ideal transformer
+        case 'T'                         % TRAFO
             
+            n3 = str2double(arg3{k1});  % Control voltage, pos side
+            n4 = str2double(arg4{k1});  % Control voltage, neg side
+            
+            % Change B and C matrices as appropriate for output nodes.
+            %  (if node is not ground)
+            
+            if n1~=0
+                B{n1,vsCnt+1} = [B{n1,vsCnt+1} '+ 1'];
+                C{vsCnt+2,n1} = [C{vsCnt+2,n1} ' - ' Name{k1}];
+            end
+            if n2~=0
+                B{n2,vsCnt+1} = [B{n2,vsCnt+1} '- 1'];
+                C{vsCnt+2,n2}= [C{vsCnt+2,n2} ' + ' Name{k1}];
+            end
+            if n3~=0
+                B{n3,vsCnt+2} = [B{n3,vsCnt+2} ' + 1'];
+                C{vsCnt+2, n3} = [C{vsCnt+2, n3} ' + 1'];
+            end
+            if n4~=0
+                B{n4,vsCnt+2} = [B{n4,vsCnt+2} ' - 1'];
+                C{vsCnt+2, n4} = [C{vsCnt+2, n4} ' - 1'];
+            end
+            D{vsCnt+1,vsCnt+1}=[D{vsCnt+1,vsCnt+1} '+ 1'];
+            D{vsCnt+1,vsCnt+2}=[D{vsCnt+1,vsCnt+2} ' - ' Name{k1}];
+            
+            j{vsCnt+1}=['I_' Name{k1} '_P']; % Add current through source to unknowns
+            j{vsCnt+2}=['I_' Name{k1} '_S']; % Add current through source to unknowns
+            vsCnt = vsCnt + 2;        % Keep track of number of voltage sources
+
         % Voltage controlled current source
         case 'G'    % VCCS GXXXXXXX N+ N- NC+ NC- VALUE
             nc1 = str2double(arg3{k1});    % Control voltage, pos side
@@ -273,7 +307,7 @@ fprintf('\nThe z matrix:  \n');
 disp(z);
 
 % Find all variables in matrices (symvar) and make them symbolic (syms)
-syms([symvar(A), symvar(x), symvar(z)]);
+syms([symvar(A), symvar(x), symvar(z)],'real');
 
 % Displey the matrix equation
 fprintf('\nThe matrix equation: \n');
@@ -289,6 +323,14 @@ end
 
 fprintf('\nThe solution:  \n');
 disp(x==eval(x))
+if rank(A)~=size(A(1,:))
+    NullA=null(A);
+    [m,n]=size(NullA);
+    fprintf('\n There is an infinite set of solutions spaned by the vector\n')
+    syms K [n 1] real
+    disp(x==null(A)*K)
+
+end
 
 %% Lastly, assign any numeric values to symbolic variables.
 % Go through the elements a line at a time and see if the values are valid
@@ -304,7 +346,7 @@ for k1=1:nLines
         case {'H', 'F'}
             [num, status] = str2num(arg4{k1}); %#ok<ST2NM>
             % Elements defined by five variables, arg5 is the value.
-        case {'E', 'G'}
+        case {'E', 'G', 'T'}
             [num, status] = str2num(arg5{k1}); %#ok<ST2NM>
     end
     if status  % status will be true if the argument was a valid number.
